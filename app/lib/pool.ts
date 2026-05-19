@@ -7,29 +7,32 @@ const API_KEY = process.env.TRAIL_API_KEY
 async function trailFetch<T>(path: string, revalidate = 300): Promise<T> {
   if (!API_KEY) throw new Error('TRAIL_API_KEY is not configured')
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Token ${API_KEY}`, 'Content-Type': 'application/json' },
     next: { revalidate },
   })
   if (!res.ok) throw new Error(`Trail API error ${res.status} for ${path}`)
   return res.json() as Promise<T>
 }
 
+// Detect site from task title prefix
 function detectSite(title: string): Site {
   return title.startsWith('[CF]') ? 'churchfield' : 'bishopstown'
 }
 
+// Strip prefix and emoji to get a clean pool name
 function cleanPoolName(title: string): string {
   return title
     .replace(/^\[CF\]\s*/, '')
     .replace(/^\[BT\]\s*/, '')
-    .split('\u{1F9EA}').join('').replace(/\s{2,}/g, ' ')
+    .replace(/🧪\s*/g, '')
     .replace(/^Test\s+/i, '')
     .trim()
 }
 
+// Detect if a step name relates to chlorine or pH
 function detectParameter(stepName: string): 'chlorine' | 'ph' | null {
   const lower = stepName.toLowerCase()
-  if (lower.includes('chlorine') || lower.includes(' cl')) return 'chlorine'
+  if (lower.includes('chlorine') || lower.includes('cl')) return 'chlorine'
   if (lower.includes('ph')) return 'ph'
   return null
 }
@@ -47,6 +50,7 @@ export async function fetchPoolDashboardData(days = 1): Promise<PoolDashboardDat
   const sinceStr = since.toISOString().split('T')[0]
   const today = new Date().toISOString().split('T')[0]
 
+  // Fetch schedules/tasks that are water tests, plus their completions
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schedulesRes = await trailFetch<any>('/schedules?per_page=100', 3600)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,12 +58,14 @@ export async function fetchPoolDashboardData(days = 1): Promise<PoolDashboardDat
     ? schedulesRes
     : (schedulesRes.data ?? schedulesRes.schedules ?? [])
 
+  // Filter to water test tasks only (contain 🧪 or "test" + "pool"/"water")
   const waterTestSchedules = allSchedules.filter((s: { title?: string; name?: string }) => {
     const title: string = s.title ?? s.name ?? ''
     const lower = title.toLowerCase()
-    return title.includes('\u{1F9EA}') || (lower.includes('test') && (lower.includes('pool') || lower.includes('water')))
+    return title.includes('🧪') || (lower.includes('test') && (lower.includes('pool') || lower.includes('water')))
   })
 
+  // Fetch completions for each schedule in the date range
   const poolMap = new Map<string, Pool>()
 
   await Promise.all(
@@ -70,27 +76,33 @@ export async function fetchPoolDashboardData(days = 1): Promise<PoolDashboardDat
       const poolKey = `${site}:${poolName}`
 
       if (!poolMap.has(poolKey)) {
-        poolMap.set(poolKey, { id: schedule.id, name: poolName, site, parameters: [], lastUpdated: null })
+        poolMap.set(poolKey, {
+          id: schedule.id,
+          name: poolName,
+          site,
+          parameters: [],
+          lastUpdated: null,
+        })
       }
 
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // Fetch completions for this schedule within the date range
         const completionsRes = await trailFetch<any>(
           `/schedules/${schedule.id}/completions?from=${sinceStr}&to=${today}&per_page=200`,
           300
         )
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const completions: any[] = Array.isArray(completionsRes)
           ? completionsRes
           : (completionsRes.data ?? completionsRes.completions ?? [])
 
+        // Build readings from completion answers
         const chlorineReadings: PoolReading[] = []
         const phReadings: PoolReading[] = []
         let chlorineRange = { targetMin: DEFAULT_RANGES.chlorine.min, targetMax: DEFAULT_RANGES.chlorine.max }
         let phRange = { targetMin: DEFAULT_RANGES.ph.min, targetMax: DEFAULT_RANGES.ph.max }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const steps: any[] = (schedule.steps as any[]) ?? []
+        // Extract target ranges from schedule step definitions
+        const steps: any[] = schedule.steps ?? []
         for (const step of steps) {
           const paramType = detectParameter(step.title ?? step.name ?? step.label ?? '')
           if (paramType === 'chlorine') chlorineRange = extractRange(step, 'chlorine')
@@ -99,7 +111,6 @@ export async function fetchPoolDashboardData(days = 1): Promise<PoolDashboardDat
 
         for (const completion of completions) {
           const ts: string = completion.completed_at ?? completion.completedAt ?? completion.created_at ?? ''
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const answers: any[] = completion.answers ?? completion.responses ?? completion.steps ?? []
 
           for (const answer of answers) {
@@ -117,6 +128,7 @@ export async function fetchPoolDashboardData(days = 1): Promise<PoolDashboardDat
           }
         }
 
+        // Sort readings by time
         const sortByTime = (a: PoolReading, b: PoolReading) =>
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         chlorineReadings.sort(sortByTime)
@@ -124,26 +136,34 @@ export async function fetchPoolDashboardData(days = 1): Promise<PoolDashboardDat
 
         const pool = poolMap.get(poolKey)!
         const allReadingTimes = [...chlorineReadings, ...phReadings].map((r) => r.timestamp)
-        pool.lastUpdated = allReadingTimes.length > 0 ? allReadingTimes.sort().at(-1) ?? null : null
+        pool.lastUpdated = allReadingTimes.length > 0
+          ? allReadingTimes.sort().at(-1) ?? null
+          : null
 
         const parameters: PoolParameter[] = []
         if (chlorineReadings.length > 0) {
           parameters.push({
-            name: 'chlorine', label: 'Free Chlorine', unit: 'ppm',
-            targetMin: chlorineRange.targetMin, targetMax: chlorineRange.targetMax,
+            name: 'chlorine',
+            label: 'Free Chlorine',
+            unit: 'ppm',
+            targetMin: chlorineRange.targetMin,
+            targetMax: chlorineRange.targetMax,
             readings: chlorineReadings,
           })
         }
         if (phReadings.length > 0) {
           parameters.push({
-            name: 'ph', label: 'pH', unit: '',
-            targetMin: phRange.targetMin, targetMax: phRange.targetMax,
+            name: 'ph',
+            label: 'pH',
+            unit: '',
+            targetMin: phRange.targetMin,
+            targetMax: phRange.targetMax,
             readings: phReadings,
           })
         }
         pool.parameters = parameters
       } catch {
-        // Skip pool silently if completions fetch fails
+        // If fetching completions fails for one pool, skip it silently
       }
     })
   )
@@ -171,11 +191,27 @@ export function getMockPoolData(): PoolDashboardData {
   }
 
   const makePool = (id: string, name: string, site: Site): Pool => ({
-    id, name, site,
+    id,
+    name,
+    site,
     lastUpdated: new Date(now - 30 * 60_000).toISOString(),
     parameters: [
-      { name: 'chlorine', label: 'Free Chlorine', unit: 'ppm', targetMin: 1, targetMax: 3, readings: makeReadings(2, 0.8, 24) },
-      { name: 'ph', label: 'pH', unit: '', targetMin: 7.2, targetMax: 7.6, readings: makeReadings(7.4, 0.2, 24) },
+      {
+        name: 'chlorine',
+        label: 'Free Chlorine',
+        unit: 'ppm',
+        targetMin: 1,
+        targetMax: 3,
+        readings: makeReadings(2, 0.8, 24),
+      },
+      {
+        name: 'ph',
+        label: 'pH',
+        unit: '',
+        targetMin: 7.2,
+        targetMax: 7.6,
+        readings: makeReadings(7.4, 0.2, 24),
+      },
     ],
   })
 
