@@ -7,7 +7,7 @@ const API_KEY = process.env.TRAIL_API_KEY
 async function trailFetch<T>(path: string, revalidate = 300): Promise<T> {
   if (!API_KEY) throw new Error('TRAIL_API_KEY is not configured')
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Token ${API_KEY}`, 'Content-Type': 'application/json' },
     next: { revalidate },
   })
   if (!res.ok) throw new Error(`Trail API error ${res.status} for ${path}`)

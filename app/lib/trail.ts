@@ -4,18 +4,19 @@ const BASE_URL = process.env.TRAIL_API_BASE_URL ?? 'https://web.trailapp.com/api
 const API_KEY = process.env.TRAIL_API_KEY
 
 async function trailFetch<T>(path: string, revalidate = 300): Promise<T> {
-  if (!API_KEY) throw new Error('TRAIL_API_KEY is not configured in .env.local')
+  if (!API_KEY) throw new Error('TRAIL_API_KEY is not configured')
 
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: `Token ${API_KEY}`,
       'Content-Type': 'application/json',
     },
     next: { revalidate },
   })
 
   if (!res.ok) {
-    throw new Error(`Trail API error ${res.status} for ${path}`)
+    const body = await res.text().catch(() => '')
+    throw new Error(`Trail API ${res.status} on ${path}: ${body.slice(0, 200)}`)
   }
 
   return res.json() as Promise<T>

@@ -7,13 +7,12 @@ export default async function PoolDashboardServer() {
   let data
   try {
     data = useMock ? getMockPoolData() : await fetchPoolDashboardData(1)
-  } catch {
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
     return (
       <section className="rounded-xl border border-red-100 bg-red-50 p-6">
         <h2 className="font-semibold text-red-700">Pool data unavailable</h2>
-        <p className="mt-1 text-sm text-red-600">
-          Could not load pool readings from Trail. Check your API key and try again.
-        </p>
+        <p className="mt-1 text-sm text-red-600 font-mono break-all">{msg}</p>
       </section>
     )
   }

@@ -9,13 +9,12 @@ export default async function TrailDashboard() {
 
   try {
     data = useMock ? getMockTrailData() : await fetchTrailDashboardData()
-  } catch {
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
     return (
       <section className="rounded-xl border border-red-100 bg-red-50 p-6">
         <h2 className="font-semibold text-red-700">Trail data unavailable</h2>
-        <p className="mt-1 text-sm text-red-600">
-          Could not connect to Trail API. Check your API key and try again.
-        </p>
+        <p className="mt-1 text-sm text-red-600 font-mono break-all">{msg}</p>
       </section>
     )
   }
