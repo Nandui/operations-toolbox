@@ -1,6 +1,6 @@
 import type { TrailLocation, TrailTaskSummary, TrailDashboardData } from './trail-types'
 
-const BASE_URL = process.env.TRAIL_API_BASE_URL ?? 'https://web.trailapp.com/api/v1'
+const BASE_URL = process.env.TRAIL_API_BASE_URL ?? 'https://api.trailapp.com/v1'
 const API_KEY = process.env.TRAIL_API_KEY
 
 async function trailFetch<T>(path: string, revalidate = 300): Promise<T> {
