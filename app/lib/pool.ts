@@ -22,7 +22,7 @@ function cleanPoolName(title: string): string {
   return title
     .replace(/^\[CF\]\s*/, '')
     .replace(/^\[BT\]\s*/, '')
-    .replace(/\u{1F9EA}\s*/g, '')
+    .split('\u{1F9EA}').join('').replace(/\s{2,}/g, ' ')
     .replace(/^Test\s+/i, '')
     .trim()
 }
